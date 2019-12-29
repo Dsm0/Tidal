@@ -28,27 +28,19 @@ supercolliderProcess args = (Process.proc "sclang" args ) -- ["app/initScripts/s
                               , Process.delegate_ctlc = False
                               }
 
--- main = do
---   let s = supercolliderProcess ["app/initScripts/startup.scd"]
---   t@(tIn, tOut, tErr, tDel) <- Process.withCreateProcess tidalProcess (interaction s)
---   Process.cleanupProcess t
-
 main = do
   let s = supercolliderProcess ["app/initScripts/startup.scd"]
       t = tidalProcess
-  st@(stIn, stOut, stErr, stDel) <- doubleWithCreateProcess s t doubleInteraction
+  st@(stIn, stOut, stErr, stDel) <- doubleWithCreateProcess s t interaction
   Process.cleanupProcess st
-
 
 type ProcessReturns = (Maybe Handle, Maybe Handle, Maybe Handle, Process.ProcessHandle)
 type ProcessHandler = Maybe Handle -> Maybe Handle -> Maybe Handle -> Process.ProcessHandle -> IO ProcessReturns
 type DualProcessHandler = Process.CreateProcess -> Process.CreateProcess -> (ProcessReturns -> ProcessReturns -> IO ProcessReturns) -> IO ProcessReturns
 
 
-
-interactionWrap f (a,b,c,d) = f a b c d
-
-doubleWithCreateProcess :: DualProcessHandler
+doubleWithCreateProcess :: DualProcessHandler -- this function allows any 2 different Processes to interact with eachother via the passed function `interaction`
+                                              -- it allows both the supercollider (sclang) and tidalcycles (ghci) processes to be controlled via one terminal
 doubleWithCreateProcess process1 process2 interaction = do
   p1_ <- Process.withCreateProcess process1 (interaction_ process2)
   return p1_
@@ -58,44 +50,21 @@ doubleWithCreateProcess process1 process2 interaction = do
           return p2_
             where interaction__ abcd_ a' b' c' d' = interaction abcd_ (a',b',c',d')
 
-            -- where interaction__ abcd_ a' b' c' d' = do
-            --           let abcd' = (a',b',c',d')
-            --           return interaction abcd_ abcd'
 
-            -- interaction_ process in'p1 out'p1 err'p1 del'p1 = do
-            --       let p1 = (in'p1, out'p1, err'p1, del'p1)
-            --       return p2_
-            --         where interaction__ :: ProcessHandler
-            --               interaction__ p1' in'p2 out'p2 err'p2 del'p2 = do
-            --                 let p2 = (in'p2, out'p2, err'p2, del'p2)
-            --                 return $ (\x -> x >>= id) $ interaction p1' p2
-
-
--- doubleWithCreateProcess process1 process2 interaction = do
---   p1_ <- Process.withCreateProcess process1 (interaction_ process2)
---   return p1_
---     where interaction_ :: ProcessHandler
---           interaction_ process in'p1 out'p1 err'p1 del'p1 = do
---                 let p1 = (in'p1, out'p1, err'p1, del'p1)
---                 p2_ <- Process.withCreateProcess process2 (interaction__ p1)
---                 return p2_
---                   where interaction__ :: ProcessHandler
---                         interaction__ p1' in'p2 out'p2 err'p2 del'p2 = do
---                           let p2 = (in'p2, out'p2, err'p2, del'p2)
---                           return $ (\x -> x >>= id) $ interaction p1' p2
-
-
-doubleInteraction :: ProcessReturns -> ProcessReturns -> IO ProcessReturns
-doubleInteraction s' t' = do
+interaction :: ProcessReturns -> ProcessReturns -> IO ProcessReturns
+interaction s' t' = do
   let (stdin',stdout',stderr',ph') = t'
       (scIn, scOut,scErr,scDel) = s'
   interaction_ stdin' stdout' stderr' ph'
     where interaction_ stdin' stdout' stderr' ph = do
-            let str = "show 3 \n"
+            let bootPath = "app/initScripts/BootTidal.hs"
+                bootFile = ":scipt" ++ bootPath ++ " \n" -- command to laod BootTidal.hs in the ghci
                 mb = maybe (error "Maybe.fromJust: Nothing") id
-            hPutStr (mb stdin') str
-            hFlush (mb stdin')
-            let pipeUserInput = do
+            hPutStr (mb stdin') bootFile -- passes BootTidal.hs to ghci as a script
+            hFlush (mb stdin') -- makes sure it evaluates (just in case)
+            let pipeUserInput = do -- this function takes user input and pipes it into the running tidalcycles process
+                                   -- until the user calls ":quit"
+                                   -- TODO: let the user input ctrl-d to stop the process
                       command <- getLine
                       sendInput command
                       if (command == ":quit")
@@ -107,8 +76,7 @@ doubleInteraction s' t' = do
             stdout__ <- pipeUserInput
             return (stdin', stdout__,stderr',ph)
 
-
-
+-- the functions below are for when I integrate command line arguments
 
 
 main_ = do
