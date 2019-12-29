@@ -1,7 +1,7 @@
--- :set -XOverloadedStrings
+:set -XOverloadedStrings
 :set prompt ""
 :set prompt-cont ""
--- :set -XDataKinds
+:set -XDataKinds
 
 import Sound.Tidal.Context
 
@@ -16,7 +16,7 @@ let p5Target :: OSCTarget
 
 import Data.List
 
-import qualified Vivid as V
+-- import qualified Vivid as V
 
 :{
 tidal <- startMulti [superdirtTarget {oLatency = 0.1, oAddress = "127.0.0.1", oPort = 57120}
