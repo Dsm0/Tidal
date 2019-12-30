@@ -1,3 +1,5 @@
+{-# LANGUAGE MultiWayIf #-}
+
 module Main where
 
 import Parser as Parser
@@ -6,8 +8,10 @@ import Sound.Tidal.Context
 import System.Environment
 import System.Exit
 import GHC.IO.Handle
+import Data.Char (chr)
 import Options.Applicative
-import System.IO (hPutStr,hPutStrLn, hFlush,hWaitForInput,stdin)
+import System.IO
+-- (hReady, hPutStr,hPutChar,hPutStrLn, hFlush,hWaitForInput,stdin,stdout)
 
 
 
@@ -32,11 +36,11 @@ createTidalProcess ghciCommand = (Process.proc firstArg otherArgs) -- ["BootTida
                   where (firstArg:otherArgs) = words ghciCommand
 
 createSupercolliderProcess:: String -> Process.CreateProcess
-createSupercolliderProcess sclangCommand = (Process.proc firstArg otherArgs ) -- ["app/initScripts/startup.scd"]
+createSupercolliderProcess sclangCommand = (Process.proc firstArg ["-s"]) -- ["app/initScripts/startup.scd"]
                               { Process.std_in  = Process.CreatePipe
                               , Process.std_out = Process.Inherit
                               , Process.std_err = Process.Inherit
-                              , Process.create_new_console = True
+                              -- , Process.create_new_console = True
                               , Process.delegate_ctlc = False
                               }
                               where (firstArg:otherArgs) = words sclangCommand
@@ -73,26 +77,60 @@ doubleWithCreateProcess process1 process2 interaction = do
 
 stInteraction :: Parser.Options -> ProcessReturns -> ProcessReturns -> IO ProcessReturns
 stInteraction options s'' t'' = do
-  let (stdin',stdout',stderr',ph') = t''
-  interaction_ stdin' stdout' stderr' ph'
-    where interaction_ stdin' stdout' stderr' ph = do
+  -- interaction_ :: ProcessReturns -> ProcessReturns -> IO ProcessReturns
+  interaction_ s'' t''
+    where interaction_ s''' t''' = do
+            let (stdin',stdout',stderr',ph') = t'''
+                (stdin'',stdout'',stderr'',ph'') = s'''
             let bootPath = Parser.tidalBootPath options
+                scBootPath = Parser.superColliderBootPath options
                 bootFile = ":script " ++ bootPath ++ " \n" -- command to laod BootTidal.hs in the ghci
+                scBootFile = "\"" ++ scBootPath ++ "\".load \f" -- command to laod BootTidal.hs in the ghci
                 mb = maybe (error "Maybe.fromJust: Nothing") id
-            _ <- hWaitForInput stdin 1000
+                -- hGetStr =
+
+                sendInput stdin_ cmd = do
+                  hPutStrLn stdin_ $ "" ++ cmd
+                  hFlush stdin_
+
+                sendInputTidal = sendInput (mb stdin')
+                sendInputSC = sendInput (mb stdin'')
+
+            hSetBuffering (mb stdin') LineBuffering
+            hSetBuffering (mb stdin'') LineBuffering
+
+
+
+
+            hPutStr (mb stdin'') scBootFile -- passes BootTidal.hs to ghci as a script
+            hFlush (mb stdin'') -- makes sure it evaluates (just in case)
+
+            -- hReady (mb stdin')
             hPutStr (mb stdin') bootFile -- passes BootTidal.hs to ghci as a script
             hFlush (mb stdin') -- makes sure it evaluates (just in case)
+
+            _ <- hWaitForInput stdin 1000
             let pipeUserInput = do -- this function takes user input and pipes it into the running tidalcycles process
                                    -- until the user calls ":quit"
                                    -- TODO: let the user input ctrl-d to stop the process
+                      hReady stdin
+                      -- putStrLn "awaitingLine"
                       command_ <- getLine
-                      sendInput command_
-                      if (command_ == ":quit")
-                        then do
-                          return (stdout')
-                        else do
-                          pipeUserInput
-                            where sendInput cmd = do { hPutStrLn (mb stdin') cmd ; hFlush (mb stdin')}
-            stdout__ <- pipeUserInput
-            _ <- Process.waitForProcess ph
-            return (stdin', stdout__,stderr',ph)
+                      if  | (command_ == ":quit") -> do
+                              sendInputTidal ":quit"
+                              -- sendInputSC "\EOT"
+                              putStrLn "quitting"
+                              return (stdout')
+                          | (take 3 command_ == ":sc") -> do
+                              -- sendInputTidal ""
+                              sendInputSC $ (drop 3 command_) ++ [chr 12]
+                              -- textInOutSC $ (take 3 command_) ++ [chr 12]
+                              -- putStrLn "from :sc to pipeUserInput"
+                              pipeUserInput
+                          | otherwise -> do
+                              sendInputTidal command_
+                              -- putStrLn "from otherwise to pipeUserInput"
+                              pipeUserInput
+            __stdout__ <- pipeUserInput
+            _ <- Process.waitForProcess ph'
+            return (stdin', __stdout__,stderr',ph')
