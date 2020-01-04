@@ -35,6 +35,14 @@ createSupercolliderProcess sclangCommand = (Process.proc firstArg ["-s"]) -- ["a
                               }
                               where (firstArg:otherArgs) = words sclangCommand
 
+createNodeProcess:: String -> Process.CreateProcess
+createNodeProcess path = (Process.proc path [])
+                              { Process.std_in  = Process.CreatePipe
+                              , Process.std_out = Process.CreatePipe
+                              , Process.std_err = Process.Inherit
+                              , Process.delegate_ctlc = False
+                              }
+
 main :: IO ()
 main = do
   optionsIO <- Parser.optionParser
@@ -43,37 +51,49 @@ main = do
       superColliderBootPath' = Parser.superColliderBootPath options
       ghciPath' = Parser.ghciPath options
       sclangPath' = Parser.sclangPath options
+      nodePath' = Parser.nodePath options
       supercolliderProcess = case (dontBootSuperCollider options) of
         False -> createSupercolliderProcess $ sclangPath'
         True  -> (Process.proc "echo" []) { Process.std_in  = Process.CreatePipe, Process.std_out = Process.Inherit, Process.std_err = Process.Inherit}
       tidalProcess = case (dontBootTidal options) of
         False -> createTidalProcess $ ghciPath'
         True  -> (Process.proc "echo" []) { Process.std_in  = Process.CreatePipe, Process.std_out = Process.Inherit, Process.std_err = Process.Inherit}
-  st@(stIn, stOut, stErr, stDel) <- doubleWithCreateProcess supercolliderProcess tidalProcess (stInteraction options)
-  Process.cleanupProcess st
+      nodeProcess = case (bootP5jsDirt options) of
+        True  -> createNodeProcess $ nodePath'
+        False -> (Process.proc "echo" []) { Process.std_in  = Process.CreatePipe, Process.std_out = Process.Inherit, Process.std_err = Process.Inherit}
+  st@(_,_,errors,_) <- startMultiProcess [tidalProcess,supercolliderProcess,nodeProcess] (stInteraction options)
+  if | errors == Nothing -> print   "exited without errors"
+     | otherwise         -> print $ "exit upon error:\n" ++ (show $ mb errors)
+       where mb = maybe (error "Maybe.fromJust: could not read exit error") id
 
 type ProcessReturns = (Maybe Handle, Maybe Handle, Maybe Handle, Process.ProcessHandle)
-type ProcessHandler = Maybe Handle -> Maybe Handle -> Maybe Handle -> Process.ProcessHandle -> IO ProcessReturns
-type DualProcessHandler = Process.CreateProcess -> Process.CreateProcess -> (ProcessReturns -> ProcessReturns -> IO ProcessReturns) -> IO ProcessReturns
+type ProcessHandler = ProcessReturns -> IO ProcessReturns
+type MultiProcessHandler = [ProcessReturns] -> [Process.CreateProcess] -> ([ProcessReturns] -> IO ProcessReturns) -> IO ProcessReturns
+
+startMultiProcess = multiProcess []
 
 
-doubleWithCreateProcess :: DualProcessHandler -- this function allows any 2 different Processes to interact with eachother via the passed function `interaction`
-                                              -- it allows both the supercollider (sclang) and tidalcycles (ghci) processes to be controlled via one terminal
-doubleWithCreateProcess process1 process2 interaction = do
-  p1_ <- Process.withCreateProcess process1 (interaction_ process2)
+multiProcess :: MultiProcessHandler
+multiProcess running [process] interaction = do
+  p1_ <- Process.withCreateProcess process (interaction_)
   return p1_
-    where interaction_ p a b c d = do
-            p2_ <- Process.withCreateProcess p (interaction__ (a,b,c,d))
-            return p2_
-              where interaction__ abcd_ a' b' c' d' = interaction abcd_ (a',b',c',d')
+    where interaction_ a b c d = do
+            interaction (running ++ [(a,b,c,d)])
 
+multiProcess running (process:xs) interaction = do
+  p1_ <- Process.withCreateProcess process (interaction_)
+  return p1_
+    where interaction_ a b c d = do
+            multiProcess (running ++ [(a,b,c,d)]) xs interaction
 
-stInteraction :: Parser.Options -> ProcessReturns -> ProcessReturns -> IO ProcessReturns
-stInteraction options s'' t'' = do
-  interaction_ s'' t''
-    where interaction_ s''' t''' = do
-            let (stdin',stdout',stderr',ph') = t'''
-                (stdin'',stdout'',stderr'',ph'') = s'''
+stInteraction :: Parser.Options -> [ProcessReturns] -> IO ProcessReturns
+stInteraction options processList = do
+  let [t'',s'', p''] = take 3 processList
+  interaction_ t'' s'' p''
+    where interaction_ s''' t''' p''' = do
+            let (stdin',stdout',stderr',ph') = t''' -- stdin, stdout for tidal process
+                (stdin'',stdout'',stderr'',ph'') = s''' -- stdin, stdout for sclang process
+                (stdin''',stdout''',stderr''',ph''') = s''' -- stdin,stdout for p5jsDirt process
             let bootPath = Parser.tidalBootPath options
                 scBootPath = Parser.superColliderBootPath options
                 bootFile = ":script " ++ bootPath ++ " \n" -- command to laod BootTidal.hs in the ghci

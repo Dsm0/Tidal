@@ -73,7 +73,7 @@ flags = Options
           ( long "nodePath"
          <> help "where to find node (only for use with p5jsDirt)"
          <> showDefault
-         <> value "node"
+         <> value "app/initScripts/node/p5jsdirt"
          <> metavar (nodePath defaultOptions))
 
 optionParser :: IO (IO Options)
