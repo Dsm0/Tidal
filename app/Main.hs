@@ -11,17 +11,8 @@ import GHC.IO.Handle
 import Data.Char (chr)
 import Options.Applicative
 import System.IO
--- (hReady, hPutStr,hPutChar,hPutStrLn, hFlush,hWaitForInput,stdin,stdout)
 
 
-
-
--- optionsFromList (x:y:xs) = case x of
---   "bootTidal" ->
-
--- to construct custom options, just use
--- customOptions = defaultOptions {bootTidal = False, sclangPath = "some/other/path"}
--- etc...
 
 exit_   = exitWith ExitSuccess
 die     = exitWith (ExitFailure 1)
@@ -40,7 +31,6 @@ createSupercolliderProcess sclangCommand = (Process.proc firstArg ["-s"]) -- ["a
                               { Process.std_in  = Process.CreatePipe
                               , Process.std_out = Process.Inherit
                               , Process.std_err = Process.Inherit
-                              -- , Process.create_new_console = True
                               , Process.delegate_ctlc = False
                               }
                               where (firstArg:otherArgs) = words sclangCommand
@@ -49,13 +39,16 @@ main :: IO ()
 main = do
   optionsIO <- Parser.optionParser
   options <- optionsIO
-  args_ <- getArgs
   let tidalBootPath' = Parser.tidalBootPath options
       superColliderBootPath' = Parser.superColliderBootPath options
       ghciPath' = Parser.ghciPath options
       sclangPath' = Parser.sclangPath options
-      supercolliderProcess = createSupercolliderProcess $ sclangPath' ++ " " ++ superColliderBootPath'
-      tidalProcess = createTidalProcess $ ghciPath'
+      supercolliderProcess = case (dontBootSuperCollider options) of
+        False -> createSupercolliderProcess $ sclangPath'
+        True  -> (Process.proc "echo" []) { Process.std_in  = Process.CreatePipe, Process.std_out = Process.Inherit, Process.std_err = Process.Inherit}
+      tidalProcess = case (dontBootTidal options) of
+        False -> createTidalProcess $ ghciPath'
+        True  -> (Process.proc "echo" []) { Process.std_in  = Process.CreatePipe, Process.std_out = Process.Inherit, Process.std_err = Process.Inherit}
   st@(stIn, stOut, stErr, stDel) <- doubleWithCreateProcess supercolliderProcess tidalProcess (stInteraction options)
   Process.cleanupProcess st
 
@@ -77,7 +70,6 @@ doubleWithCreateProcess process1 process2 interaction = do
 
 stInteraction :: Parser.Options -> ProcessReturns -> ProcessReturns -> IO ProcessReturns
 stInteraction options s'' t'' = do
-  -- interaction_ :: ProcessReturns -> ProcessReturns -> IO ProcessReturns
   interaction_ s'' t''
     where interaction_ s''' t''' = do
             let (stdin',stdout',stderr',ph') = t'''
@@ -87,7 +79,6 @@ stInteraction options s'' t'' = do
                 bootFile = ":script " ++ bootPath ++ " \n" -- command to laod BootTidal.hs in the ghci
                 scBootFile = "\"" ++ scBootPath ++ "\".load \f" -- command to laod BootTidal.hs in the ghci
                 mb = maybe (error "Maybe.fromJust: Nothing") id
-                -- hGetStr =
 
                 sendInput stdin_ cmd = do
                   hPutStrLn stdin_ $ "" ++ cmd
@@ -98,9 +89,6 @@ stInteraction options s'' t'' = do
 
             hSetBuffering (mb stdin') LineBuffering
             hSetBuffering (mb stdin'') LineBuffering
-
-
-
 
             hPutStr (mb stdin'') scBootFile -- passes BootTidal.hs to ghci as a script
             hFlush (mb stdin'') -- makes sure it evaluates (just in case)
@@ -114,22 +102,21 @@ stInteraction options s'' t'' = do
                                    -- until the user calls ":quit"
                                    -- TODO: let the user input ctrl-d to stop the process
                       hReady stdin
-                      -- putStrLn "awaitingLine"
                       command_ <- getLine
                       if  | (command_ == ":quit") -> do
                               sendInputTidal ":quit"
-                              -- sendInputSC "\EOT"
                               putStrLn "quitting"
                               return (stdout')
                           | (take 3 command_ == ":sc") -> do
-                              -- sendInputTidal ""
+                              -- TODO: evaluate arguments passed to :sc as haskell statements,
+                              -- then have the output of those haskell statements be passed to sclang
+                              -- this would allow for wrapping sclang functions as haskell functions
+
+                              -- this likely involves creating a pipe for the ghci stdout
                               sendInputSC $ (drop 3 command_) ++ [chr 12]
-                              -- textInOutSC $ (take 3 command_) ++ [chr 12]
-                              -- putStrLn "from :sc to pipeUserInput"
                               pipeUserInput
                           | otherwise -> do
                               sendInputTidal command_
-                              -- putStrLn "from otherwise to pipeUserInput"
                               pipeUserInput
             __stdout__ <- pipeUserInput
             _ <- Process.waitForProcess ph'
