@@ -5,14 +5,13 @@ module Sound.Tidal.UI where
 import           Prelude hiding ((<*), (*>))
 
 import           Data.Char (digitToInt, isDigit, ord)
-import           Data.Bits (testBit, Bits)
+import           Data.Bits (testBit, Bits, xor, shiftL, shiftR)
 -- import           System.Random (randoms, mkStdGen)
-import           System.Random.MWC
-import           Control.Monad.ST
-import           Control.Monad.Primitive (PrimState, PrimMonad)
-import qualified Data.Vector as V
-import           Data.Word (Word32)
-import           Data.Ratio ((%),numerator,denominator)
+-- import           Control.Monad.ST
+-- import           Control.Monad.Primitive (PrimState, PrimMonad)
+-- import qualified Data.Vector as V
+-- import           Data.Word (Word32)
+import           Data.Ratio ((%))
 import           Data.List (sort, sortOn, findIndices, elemIndex, groupBy, transpose, intercalate, findIndex)
 import           Data.Maybe (isJust, fromJust, fromMaybe, mapMaybe)
 import qualified Data.Text as T
@@ -29,20 +28,32 @@ import           Sound.Tidal.Utils
 -- * UI
 
 -- | Randomisation
-timeToSeed :: (PrimMonad m, Real a) => a -> m (Gen (PrimState m))
-timeToSeed x = do
-  let x' = toRational (x*x) / 1000000
-  let n' = fromIntegral $ numerator x'
-  let d' = fromIntegral $ denominator x'
-  initialize (V.fromList [n',d'] :: V.Vector Word32)
 
-timeToRand :: RealFrac a => a -> Double
-timeToRand x = runST $ do seed <- timeToSeed x
-                          uniform seed
+-- cf. George Marsaglia (2003). "Xorshift RNGs". Journal of Statistical Software 8:14.
+-- https://www.jstatsoft.org/article/view/v008i14
+xorwise :: Int -> Int
+xorwise x =
+  let a = xor (shiftL x 13) x
+      b = xor (shiftR a 17) a
+  in xor (shiftL b 5) b
 
-timeToRands :: RealFrac a => a -> Int -> [Double]
-timeToRands x n = V.toList $ runST $ do seed <- timeToSeed x
-                                        uniformVector seed n
+-- stretch 300 cycles over the range of [0,2**29 == 536870912) then apply the xorshift algorithm
+timeToIntSeed :: RealFrac a => a -> Int
+timeToIntSeed = xorwise . truncate . (* 536870912) . snd . (properFraction :: (RealFrac a => a -> (Int,a))) . (/ 300)
+
+intSeedToRand :: Fractional a => Int -> a
+intSeedToRand = (/ 536870912) . realToFrac . (`mod` 536870912)
+
+timeToRand :: (RealFrac a, Fractional b) => a -> b
+timeToRand = intSeedToRand . timeToIntSeed
+
+timeToRands :: (RealFrac a, Fractional b) => a -> Int -> [b]
+timeToRands t n = timeToRands' (timeToIntSeed t) n
+
+timeToRands' :: Fractional a => Int -> Int -> [a]
+timeToRands' seed n
+  | n <= 0 = []
+  | otherwise = (intSeedToRand seed) : (timeToRands' (xorwise seed) (n-1))
 
 {-|
 
@@ -80,7 +91,7 @@ jux (# ((1024 <~) $ gain rand)) $ sound "sn sn ~ sn" # gain rand
 @
 -}
 rand :: Fractional a => Pattern a
-rand = Pattern (\(State a@(Arc s e) _) -> [Event (Context []) Nothing a (realToFrac $ timeToRand $ (e + s)/2)])
+rand = Pattern (\(State a@(Arc s e) _) -> [Event (Context []) Nothing a (realToFrac $ (timeToRand ((e + s)/2) :: Double))])
 
 {- | Just like `rand` but for whole numbers, `irand n` generates a pattern of (pseudo-) random whole numbers between `0` to `n-1` inclusive. Notably used to pick a random
 samples from a folder:
@@ -261,11 +272,14 @@ always = id
 
 {- | @someCyclesBy@ is a cycle-by-cycle version of @sometimesBy@. It has a
 `someCycles = someCyclesBy 0.5` alias -}
-someCyclesBy :: Double -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
-someCyclesBy x = when test
+someCyclesBy :: Pattern Double -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
+someCyclesBy pd f pat = innerJoin $ (\d -> _someCyclesBy d f pat) <$> pd
+
+_someCyclesBy :: Double -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
+_someCyclesBy x = when test
   where test c = timeToRand (fromIntegral c :: Double) < x
 
-somecyclesBy :: Double -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
+somecyclesBy :: Pattern Double -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
 somecyclesBy = someCyclesBy
 
 someCycles :: (Pattern a -> Pattern a) -> Pattern a -> Pattern a
@@ -1066,13 +1080,13 @@ lindenmayerI n r s = fmap (fromIntegral . digitToInt) $ lindenmayer n r s
 {- | @runMarkov n tmat xi seed@ generates a Markov chain (as a list) of length @n@
 using the transition matrix @tmat@ starting from initial state @xi@, starting
 with random numbers generated from @seed@
-Each entry in the chain is the index of state (starting from zero). 
+Each entry in the chain is the index of state (starting from zero).
 Each row of the matrix will be automatically normalized. For example:
 @
 runMarkov 8 [[2,3], [1,3]] 0 0
 @
 will produce a two-state chain 8 steps long, from initial state @0@, where the
-transition probability from state 0->0 is 2/5, 0->1 is 3/5, 1->0 is 1/4, and 
+transition probability from state 0->0 is 2/5, 0->1 is 3/5, 1->0 is 1/4, and
 1->1 is 3/4.  -}
 runMarkov :: Int -> [[Double]] -> Int -> Time -> [Int]
 runMarkov n tp xi seed = reverse $ (iterate (markovStep $ renorm) [xi])!! (n-1) where
@@ -1099,7 +1113,7 @@ markovPat :: Pattern Int -> Pattern Int -> [[Double]] -> Pattern Int
 markovPat = tParam2 _markovPat
 
 _markovPat :: Int -> Int -> [[Double]] -> Pattern Int
-_markovPat n xi tp = splitQueries $ Pattern (\(State a@(Arc s _) _) -> 
+_markovPat n xi tp = splitQueries $ Pattern (\(State a@(Arc s _) _) ->
   queryArc (listToPat $ runMarkov n tp xi (sam s)) a)
 
 {-|
@@ -1295,7 +1309,7 @@ randrun n' =
   splitQueries $ Pattern (\(State a@(Arc s _) _) -> events a $ sam s)
   where events a seed = mapMaybe toEv $ zip arcs shuffled
           where shuffled = map snd $ sortOn fst $ zip rs [0 .. (n'-1)]
-                rs = timeToRands seed n'
+                rs = timeToRands seed n' :: [Double]
                 arcs = zipWith Arc fractions (tail fractions)
                 fractions = map (+ (sam $ start a)) [0, 1 / fromIntegral n' .. 1]
                 toEv (a',v) = do a'' <- subArc a a'
@@ -1341,7 +1355,7 @@ layer fs p = stack $ map ($ p) fs
 -- | @arpeggiate@ finds events that share the same timespan, and spreads
 -- them out during that timespan, so for example @arpeggiate "[bd,sn]"@
 -- gets turned into @"bd sn"@. Useful for creating arpeggios/broken chords.
-arpeggiate :: Pattern a -> Pattern a 
+arpeggiate :: Pattern a -> Pattern a
 arpeggiate = arpWith id
 
 -- | Shorthand alias for arpeggiate
@@ -1810,10 +1824,10 @@ swap things p = filterJust $ (`lookup` things) <$> p
 snowball :: Int -> (Pattern a -> Pattern a -> Pattern a) -> (Pattern a -> Pattern a) -> Pattern a -> Pattern a
 snowball depth combinationFunction f pattern = cat $ take depth $ scanl combinationFunction pattern $ iterate f pattern
 
-{- @soak@ | 
+{- @soak@ |
     applies a function to a pattern and cats the resulting pattern,
     then continues applying the function until the depth is reached
-    this can be used to create a pattern that wanders away from 
+    this can be used to create a pattern that wanders away from
     the original pattern by continually adding random numbers
     d1 $ note (scale "hexDorian" mutateBy (+ (range -1 1 $ irand 2)) 8 $ "0 1 . 2 3 4") # s "gtr"
 -}
@@ -1822,7 +1836,7 @@ soak depth f pattern = cat $ take depth $ iterate f pattern
 
 deconstruct :: Int -> Pattern String -> String
 deconstruct n p = intercalate " " $ map showStep $ toList p
-  where 
+  where
     showStep :: [String] -> String
     showStep [] = "~"
     showStep [x] = x
@@ -1863,10 +1877,14 @@ squeezeJoinUp pp = pp {query = q}
              return (Event (combineContexts [ci,co]) (Just w') p' v)
         munge _ _ _ _ = Nothing
 
-chew :: Int -> Pattern Int -> ControlPattern  -> ControlPattern
-chew n ipat pat = (squeezeJoinUp $ zoompat <$> ipat) |/ P.speed (pure $ fromIntegral n)
+_chew :: Int -> Pattern Int -> ControlPattern  -> ControlPattern
+_chew n ipat pat = (squeezeJoinUp $ zoompat <$> ipat) |/ P.speed (pure $ fromIntegral n)
   where zoompat i = zoom (i'/(fromIntegral n), (i'+1)/(fromIntegral n)) (pat)
            where i' = fromIntegral $ i `mod` n
+
+-- TODO maybe _chew could pattern the first parameter directly..
+chew :: Pattern Int -> Pattern Int -> ControlPattern  -> ControlPattern
+chew npat ipat pat = innerJoin $ (\n -> _chew n ipat pat) <$> npat
 
 __binary :: Data.Bits.Bits b => Int -> b -> [Bool]
 __binary n num = map (testBit num) $ reverse [0 .. n-1]

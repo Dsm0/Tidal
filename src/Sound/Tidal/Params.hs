@@ -160,6 +160,7 @@ delayfeedback = pF "delayfeedback"
 -- | a pattern of numbers from 0 to 1. Sets the length of the delay.
 delaytime :: Pattern Double -> ControlPattern
 delaytime = pF "delaytime"
+
 detune :: Pattern Double -> ControlPattern
 detune = pF "detune"
 
@@ -381,6 +382,10 @@ voice = pF "voice"
 -- | formant filter to make things sound like vowels, a pattern of either `a`, `e`, `i`, `o` or `u`. Use a rest (`~`) for no effect.
 vowel :: Pattern String -> ControlPattern
 vowel = pS "vowel"
+
+voweli :: Pattern Int -> ControlPattern
+voweli = pI "vowel"
+
 waveloss :: Pattern Double -> ControlPattern
 waveloss = pF "waveloss"
 
@@ -482,7 +487,7 @@ lbrick :: Pattern Double -> ControlPattern
 lbrick = pF "lbrick"
 
 -- aliases
-att, bpf, bpq, chdecay, ctf, ctfg, delayfb, delayt, det, gat, hg, hpf, hpq, lag, lbd, lch, lcl, lcp, lcr, lfoc, lfoi
+att, bpf, bpq, chdecay, ctf, ctfg, delayfb, dfb, delayt, dt, det, gat, hg, hpf, hpq, lag, lbd, lch, lcl, lcp, lcr, lfoc, lfoi
    , lfop, lht, llt, loh, lpf, lpq, lsn, ohdecay, phasdp, phasr, pit1, pit2, pit3, por, rel, sz, sag, scl, scp
    , scr, sld, std, stt, sus, tdecay, tremdp, tremr, vcf, vco, voi
  :: Pattern Double -> ControlPattern
@@ -493,7 +498,9 @@ chdecay = clhatdecay
 ctf = cutoff
 ctfg = cutoffegint
 delayfb = delayfeedback
+dfb = delayfeedback
 delayt = delaytime
+dt = delaytime
 det = detune
 gat = gate
 hg = hatgrain

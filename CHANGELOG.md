@@ -1,5 +1,38 @@
 # TidalCycles log of changes
 
+## 1.5.2 - Rivelin
+        * Fix streamAll
+
+## 1.5.1 - Blacka Moor
+	* Bugfix splice
+
+## 1.5.0 - Active travel
+	* Export drawLineSz @mxmxyz
+	* tidal-parse additions (bite, splice, pickF, select, squeeze; fixed slice) @dktr0
+	* New, more efficient pseudorandom number generator @dktr0
+	* Pattern first someCyclesBy param @bgold-cosmos
+	* Refactored, more flexible OSC targetting @yaxu
+	* Simplify tidal-boot-script in tidal.el @jamagin
+	* Support state substitution in mininotation #530 @yaxu
+	* Pattern first parameter of splice #656 @yaxu
+	* Pattern first parameter of chew @yaxu
+	* add 'x' fraction alias for 1/6 @yaxu
+	* add dfb alias for delayfeedback param, dt for delaytime @yaxu
+	* add unmuteAll and only to BootTidal.hs @yaxu
+
+## 1.4.9 - Housebound spirit
+	* Simplify 'show'ing of patterns @yaxu
+	* New `draw` function for drawing a pattern of single characters as a text-based diagram,
+	  with friends `drawLine` and `drawLineSz` for drawing multiple cycles @yaxu
+	* Fixes and expansions of ratio aliases - s should be a sixteenth @mxmxyz, w is now 1, f is now 0.2
+	* Simplify definition of `accumulate` using scanl @benjwadams
+	* The first parameter of `someCyclesBy` is now patternable @bgold-cosmos
+
+## 1.4.8 - Limerick
+        * Add ratio shorthand to floating point patterns @yaxu
+        * Support fractional scales, add Arabic scales @quakehead
+        * Additions to tidal-parse including support from overgain, overshape adn rot @dktr0
+        * Move prompt-cont setting to end of BootTidal.hs (older versions of Haskell crash out at this point) @ndr-brt
 ## 1.4.7 - Bleep
 
 	* Fix BootTidal.hs - make loadable in atom @bgold-cosmos
