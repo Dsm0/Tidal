@@ -3,6 +3,8 @@ resolver: lts-16.31
 packages:
   - '.'
   - 'tidal-parse'
+  - P5hs
+
 
 extra-deps:
   - hosc-0.18.1

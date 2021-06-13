@@ -1,0 +1,3 @@
+[submodule "P5hs"]
+	path = P5hs
+	url = git@github.com:Dsm0/P5hs.git
