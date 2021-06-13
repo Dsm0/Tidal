@@ -10,3 +10,4 @@ extra-deps:
   - haskellish-0.2.4.3
 
 allow-newer: true
+allow-different-user: true
